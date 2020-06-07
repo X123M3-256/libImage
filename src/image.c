@@ -300,17 +300,16 @@ memmove(dst->pixels,src->pixels,src->width*src->height);
 //TODO prevent writing outside image
 void image_blit(image_t* dst,image_t* src,int16_t x_offset,int16_t y_offset)
 {
-x_offset+=src->x_offset;
-y_offset+=src->y_offset;
-	if(x_offset<0||y_offset<0||x_offset+src->width>dst->width||y_offset+src->height>dst->height)
-	{
-	printf("Image blit out of bounds\n");
-	return;
-	}
+x_offset+=src->x_offset-dst->x_offset;
+y_offset+=src->y_offset-dst->y_offset;
+	
 	for(int y=0;y<src->height;y++)
 	for(int x=0;x<src->width;x++)
 	{
-		if(src->pixels[y*src->width+x])dst->pixels[(y_offset+y)*dst->width+x_offset+x]=src->pixels[y*src->width+x];
+	int dst_x=x_offset+x;
+	int dst_y=y_offset+y;
+	
+		if(src->pixels[y*src->width+x]&&dst_x>=0&&dst_y>=0&&dst_x<dst->width&&dst_y<dst->height)dst->pixels[dst_y*dst->width+dst_x]=src->pixels[y*src->width+x];
 	}
 }
 
@@ -345,13 +344,12 @@ image->flags=1;
 
 png_byte color_type=png_get_color_type(png,info);
 png_byte bit_depth=png_get_bit_depth(png,info);
-	if(bit_depth==16)png_set_strip_16(png);
-	if(color_type==PNG_COLOR_TYPE_PALETTE)png_set_palette_to_rgb(png);
-	if(color_type==PNG_COLOR_TYPE_GRAY&&bit_depth<8)png_set_expand_gray_1_2_4_to_8(png);
-	if(png_get_valid(png, info, PNG_INFO_tRNS))png_set_tRNS_to_alpha(png);
-	if(color_type==PNG_COLOR_TYPE_RGB||color_type==PNG_COLOR_TYPE_GRAY||color_type==PNG_COLOR_TYPE_PALETTE)png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
-	if(color_type == PNG_COLOR_TYPE_GRAY||color_type == PNG_COLOR_TYPE_GRAY_ALPHA)png_set_gray_to_rgb(png);
 
+		if(color_type!=PNG_COLOR_TYPE_PALETTE)
+		{
+		fclose(file);
+		return 1;
+		}
 png_read_update_info(png, info);
 
 png_bytep* row_pointers=malloc(sizeof(png_bytep)*image->height);
@@ -367,21 +365,7 @@ image->pixels=malloc(image->width*image->height*sizeof(uint8_t));
 	for(int y=0;y<image->height;y++)
 	for(int x=0;x<image->width;x++)
 	{
-	uint8_t r=(uint8_t)row_pointers[y][4*x];
-	uint8_t g=(uint8_t)row_pointers[y][4*x+1];
-	uint8_t b=(uint8_t)row_pointers[y][4*x+2];
-	uint32_t closest_palette_index=0;
-	uint32_t shortest_distance=r*r+g*g+b*b;
-		for(uint32_t i=1;i<256;i++)
-		{
-		uint32_t distance=(r-palette[i].red)*(r-palette[i].red)+(g-palette[i].green)*(g-palette[i].green)+(b-palette[i].blue)*(b-palette[i].blue);
-			if(distance<shortest_distance)
-			{
-			shortest_distance=distance;
-			closest_palette_index=i;
-			}
-		}
-	image->pixels[x+y*image->width]=closest_palette_index;
+	image->pixels[x+y*image->width]=(uint8_t)row_pointers[y][x];
 	}
 	for(int y=0;y<image->height;y++)
 	{
@@ -428,6 +412,49 @@ png_write_png(png_ptr,info_ptr,PNG_TRANSFORM_IDENTITY,NULL);
 png_free(png_ptr,row_pointers);
 png_destroy_write_struct(&png_ptr,&info_ptr);
 return 0;    
+}
+
+void image_crop(image_t* image)
+{
+int x_min=INT32_MAX;
+int x_max=INT32_MIN;
+int y_min=INT32_MAX;
+int y_max=INT32_MIN;
+
+	for(int y=0;y<image->height;y++)
+	for(int x=0;x<image->width;x++)
+	{	
+		if(image->pixels[x+y*image->width]>0)
+		{
+			if(x<x_min)x_min=x;
+			if(x>x_max)x_max=x;
+			if(y<y_min)y_min=y;
+			if(y>y_max)y_max=y;
+		}
+	}
+
+	if(x_max<x_min)
+	{
+	image->x_offset=0;
+	image->y_offset=0;
+	image->width=1;
+	image->height=1;
+	}
+	else
+	{
+	int stride=image->width;
+	image->x_offset+=x_min;
+	image->y_offset+=y_min;
+	image->width=x_max-x_min+1;
+	image->height=y_max-y_min+1;
+		
+		for(int y=0;y<image->height;y++)
+		for(int x=0;x<image->width;x++)
+		{	
+		image->pixels[x+y*image->width]=image->pixels[(x+x_min)+(y+y_min)*stride];
+		}
+
+	}
 }
 
 
